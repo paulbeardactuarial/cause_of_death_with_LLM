@@ -3,8 +3,9 @@ library(ellmer)
 
 # Note for use of the LLM you must have an API with groq. And set GROQ_API_KEY using usethis::edit_r_environ()
 
-# source functions written for this work
-source(".\prompt_writing_functions.R")
+# source functions and data written for this work
+source("./data_import.R")
+source("./prompt_writing_functions.R")
 
 # get our causes of death for categorizing
 x <- cod_data$D
@@ -59,12 +60,17 @@ for (i in vectors) {
   output_list[[i]] <- model$chat(list_x[[i]], echo = FALSE) 
   # we are capped at 30 requests or 6000 tokens per minute under Groq free service
   # waiting x seconds between requests to try and reduce token use
+  saveRDS(output_list, "output_list.rds")
   Sys.sleep(10)
 }
-
 # convert the output back into dataframes...
-output_list[1:4] |> purrr::map(function(x) x |> stringr::str_remove_all("\`") |> stringr::str_remove("json") |> jsonlite::fromJSON())
-
+mapping_df <- 
+output_list[1:6] |> purrr::map(function(x) {
+  x |>
+    stringr::str_remove_all("\`") |>
+    stringr::str_remove("json") |>
+    jsonlite::fromJSON()
+}) |> dplyr::bind_rows()
 
 
 # check the length of each output vector
@@ -75,5 +81,3 @@ data.frame(
   list_x |> unlist(),
   output_list |> unlist()
 )
-
-output_list[[i]] 
