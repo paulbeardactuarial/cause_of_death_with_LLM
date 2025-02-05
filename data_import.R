@@ -1,4 +1,6 @@
 
+# cause of death data can be downloaded from https://www.nomisweb.co.uk/query/construct/summary.asp?menuopt=200&subcomp=
+# the file below was downloaded from this site
 fp <- r"{./Data/34506561512084822.csv}"
 
 

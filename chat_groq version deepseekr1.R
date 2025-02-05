@@ -5,12 +5,12 @@ library(ellmer)
 source("./data_import.R")
 source("./prompt_writing_functions.R")
 
-# set max chunk size... this might need refning based on what API seems to accept
-max_chunk_size <- 10
+# set max chunk size... this might need refining based on what API seems to accept
+max_chunk_size <- 50
 sleep_time_between_chunks <- 0
-chat_function <- chat_openai 
-model <- "gpt-4o-mini-2024-07-18"
-output_name <- "output_openai_gpt_4o_mini"
+chat_function <- chat_groq 
+model <- "deepseek-r1-distill-llama-70b"
+output_name <- "output_deepseek_r1"
 
 # get our prompts of x for processing
 list_x <- x |> split_vector(max_chunk_size)
@@ -33,4 +33,3 @@ for (i in vectors) {
   
   Sys.sleep(sleep_time_between_chunks)
 }
-
