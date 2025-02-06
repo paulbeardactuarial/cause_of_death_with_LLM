@@ -3,6 +3,7 @@ output_groq_llama33 <- read_rds("./Data/output_groq_llama33.rds")
 output_openai_gpt_4o_mini <- read_rds("./Data/output_openai_gpt_4o_mini.rds")
 output_openai_gpt_4o <- read_rds("./Data/output_openai_gpt_4o.rds")
 output_deepseek_r1 <- read_rds("./Data/output_deepseek_r1.rds")
+output_gemini <- read_rds("./Data/output_gemini.rds")
 
 json_list_to_df <- function(output_list) {
   output_list |> purrr::map(function(x) {
@@ -23,7 +24,7 @@ output_openai_gpt_4o_mini <- output_openai_gpt_4o_mini |> json_list_to_df() |> u
 output_openai_gpt_4o <- output_openai_gpt_4o |> json_list_to_df() |> unique() |> mutate(across(everything(), tolower))
 output_groq_llama33 <- output_groq_llama33 |> json_list_to_df() |> unique() |> mutate(across(everything(), tolower))
 output_deepseek_r1 <- output_deepseek_r1 |> json_list_to_df() |> unique() |> mutate(across(everything(), tolower))
-
+output_gemini <- output_gemini |> json_list_to_df() |> unique() |> mutate(across(everything(), tolower))
 
 cod_classified_res <-
 data.frame(cause_of_death = x, category = NA) |> 
@@ -31,6 +32,8 @@ data.frame(cause_of_death = x, category = NA) |>
   left_join(output_openai_gpt_4o_mini, by = "cause_of_death", suffix = c("", "_gpt_4o_mini" )) |> 
   left_join(output_openai_gpt_4o, by = "cause_of_death", suffix = c("", "_gpt_4o]" )) |> 
   left_join(output_groq_llama33, by = "cause_of_death", suffix = c("", "_groq_llama33" )) |>  
+  left_join(output_deepseek_r1, by = "cause_of_death", suffix = c("", "_deepseek_r1" )) |>  
+  left_join(output_gemini, by = "cause_of_death", suffix = c("", "_gemini" )) |>  
   select(-category)
   
 
