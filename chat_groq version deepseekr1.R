@@ -23,7 +23,7 @@ llm_output <- vector("list", length = length(prompts_list))
 # loop through and collect results!
 for (i in vectors) {
   
-  llm_chat <- do.call(chat_function, list(model = model, system_prompt = write_intial_prompt(options)))
+  llm_chat <- do.call(chat_function, list(model = model, system_prompt = write_initial_prompt_refined(options)))
   
   llm_output[[i]] <- llm_chat$chat(prompts_list[[i]], echo = FALSE) 
   

@@ -42,7 +42,7 @@ options <-
     "larynx cancer",
     "kidney cancer",
     "acute myeloid leukemia",
-    "mouth cancer",
+    "oral cavity cancer",
     "esophageal cancer",
     "pancreatic cancer",
     "bladder cancer",
@@ -50,3 +50,8 @@ options <-
     "prostate cancer",
     "none"
   )
+
+cod_data |> filter(D |> stringr::str_detect(
+" unspecified motor vehicles in traffic accident")) |> dplyr::pull(cause_of_death)
+
+x |> janitor::tabyl() |> arrange(desc(n)) |> head()

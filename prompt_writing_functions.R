@@ -1,16 +1,4 @@
 
-# function to write the intial prompt for classification
-# write_intial_prompt <- function(options) {
-# 
-#   glue::glue(
-#     "You are a classification LLM. For every line of text you receive, you will only return which of the options best matches. ",
-#     "\n\nThe options are:\n",
-#     paste0("\"", options, collapse = "\"\n"), "\"",
-#     "\n\nNo capitalization. No explanations. Write only one of the above options for each line of text you are given."
-#   )
-#   
-# }
-
 write_intial_prompt <- function(options) {
   
   glue::glue(
@@ -18,6 +6,17 @@ write_intial_prompt <- function(options) {
     You must only return the edited version of this JSON file. Please add 'category' to each item, which can only ever have one of the following values:\n",
     paste0("\"", options, collapse = "\"\n"), "\"",
     "\n\nNo capitalization. No explanations. Return only the data in a structured JSON format."
+  )
+  
+}
+
+write_initial_prompt_refined <- function(options) {
+  
+  glue::glue(
+    "You are a classification LLM. You will receive a JSON file. The file will contain a list of items with cause_of_death.
+    It is important that you return only an edited version of the JSON file. Add 'category' to each item, which can only ever pick one of the values below. If none are suitable choose the category of \"none\":\n\n",
+    paste0("\"", options, collapse = "\"\n"), "\"",
+    "\n\nNo explanations. Return only the data in a structured JSON format. Your final JSON code must begin with ``` and end with ```"
   )
   
 }
