@@ -51,7 +51,3 @@ options <-
     "none"
   )
 
-cod_data |> filter(D |> stringr::str_detect(
-" unspecified motor vehicles in traffic accident")) |> dplyr::pull(cause_of_death)
-
-x |> janitor::tabyl() |> arrange(desc(n)) |> head()
