@@ -6,7 +6,7 @@ source("./data_import.R")
 source("./prompt_writing_functions.R")
 
 # set max chunk size... this might need refining based on what API seems to accept
-max_chunk_size <- 50
+max_chunk_size <- 30
 sleep_time_between_chunks <- 0
 chat_function <- chat_groq 
 model <- "deepseek-r1-distill-llama-70b"

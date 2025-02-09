@@ -1,4 +1,6 @@
 
+source("./data_import.R")
+
 output_groq_llama33 <- read_rds("./Data/output_groq_llama33.rds")
 output_openai_gpt_4o_mini <- read_rds("./Data/output_openai_gpt_4o_mini.rds")
 output_openai_gpt_4o <- read_rds("./Data/output_openai_gpt_4o.rds")
@@ -9,7 +11,6 @@ json_list_to_df <- function(output_list) {
   output_list |> purrr::map(function(x) {
     has_ticks <- stringr::str_detect(x, "```")
     if(has_ticks) {
-      #x <- x |> stringr::str_extract( "(?s)```(.*?)```")
       x <- x |> stringr::str_extract_all( "(?s)```(.*?)```") |> pluck(1) |> tail(1)
       }
     x |> 
@@ -27,7 +28,7 @@ output_deepseek_r1 <- output_deepseek_r1 |> json_list_to_df() |> unique() |> mut
 output_gemini <- output_gemini |> json_list_to_df() |> unique() |> mutate(across(everything(), tolower))
 
 cod_classified_res <-
-data.frame(cause_of_death = x, category = NA) |> 
+data.frame(cause_of_death = cod_vector, category = NA) |> 
   unique() |> 
   mutate(across(everything(), tolower)) |> 
   left_join(output_openai_gpt_4o_mini, by = "cause_of_death", suffix = c("", "_gpt_4o_mini" )) |> 
@@ -90,11 +91,11 @@ cod_classified_res |>
     relationship = "one-to-one"
   ) 
 
-cod_classified_res |> dplyr::glimpse()
+cod_classified_res |> filter(without_consensus) |> glimpse()
 
 
 cod_data |> 
-  mutate(cause_of_death = tolower(D)) |> 
+  mutate(cause_of_death = tolower(cause_of_death)) |> 
   inner_join(
     cod_classified_res,
     by = "cause_of_death"
