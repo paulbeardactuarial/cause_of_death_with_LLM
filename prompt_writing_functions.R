@@ -10,13 +10,26 @@ write_intial_prompt <- function(options) {
   
 }
 
-write_initial_prompt_refined <- function(options) {
+write_initial_prompt_v2 <- function(options) {
   
   glue::glue(
     "You are a classification LLM. You will receive a JSON file. The file will contain a list of items with cause_of_death.
     It is important that you return only an edited version of the JSON file. Add 'category' to each item, which can only ever pick one of the values below. If none are suitable choose the category of \"none\":\n\n",
     paste0("\"", options, collapse = "\"\n"), "\"",
     "\n\nNo explanations. Return only the data in a structured JSON format. Your final JSON code must begin with ``` and end with ```"
+  )
+  
+}
+
+write_initial_prompt_v3 <- function(options) {
+  
+  glue::glue(
+    "You are a classification LLM. You will receive a JSON file. The file will contain a list of items with cause_of_death.
+    It is important that you return only an edited version of the JSON file. Add 'category' to each item, which can only ever pick one of the values below. If none are suitable choose the category of \"none\":\n\n",
+    paste0("\"", options, collapse = "\"\n"), "\"",
+    "\n\nNo explanations. Return only the data in a structured JSON format. Your final JSON code must begin with ``` and end with ```.
+    If a cause of death cannot be linked to smoking in any way, for example if it is an infectious disease, a genetic disorder, or has an external cause provided in the cause_of_death text (e.g. asbestos), then assign the category as \"none\". 
+    "
   )
   
 }

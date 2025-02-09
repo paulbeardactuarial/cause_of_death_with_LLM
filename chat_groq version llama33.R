@@ -12,8 +12,8 @@ chat_function <- chat_groq
 model <- "llama-3.3-70b-versatile"
 output_name <- "output_groq_llama33"
 
-# get our prompts of x for processing
-list_x <- x |> split_vector(max_chunk_size)
+# get our prompts of cod_vector for processing
+list_x <- cod_vector |> split_vector(max_chunk_size)
 prompts_list <- list_x |> purrr::map(glue_to_json)
 vectors <- seq_along(prompts_list)
 
@@ -23,7 +23,7 @@ llm_output <- vector("list", length = length(prompts_list))
 # loop through and collect results!
 for (i in vectors) {
   
-  llm_chat <- do.call(chat_function, list(model = model, system_prompt = write_initial_prompt_refined(options)))
+  llm_chat <- do.call(chat_function, list(model = model, system_prompt = write_initial_prompt_v3(options)))
   
   llm_output[[i]] <- llm_chat$chat(prompts_list[[i]], echo = FALSE) 
   

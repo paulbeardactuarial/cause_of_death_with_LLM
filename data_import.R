@@ -26,16 +26,18 @@ cod_data <-
 
 
 # get our causes of death for categorizing
-x <- cod_data$D
+cod_vector <- cod_data$D |> unique()
+
+# shuffle the `cod_vector` ...just to make it harder for the robots :)
+cod_vector <- cod_vector |> sample(size = length(cod_vector), replace = FALSE)
 
 # get our options for placing into categories
 # the options are taken from the following paper...
 # https://pmc.ncbi.nlm.nih.gov/articles/PMC3229033/#:~:text=Current%20smokers%20had%20significantly%20higher,23.93)%2C%20smoking%2Drelated%20cancers
 options <-
   c(
-    "coronary heart disease",
+    "ischaemic heart disease", #https://archive.datadictionary.nhs.uk/DD%20Release%20March%202021/Covid19PRA/Coronary_Heart.html
     "cerebrovascular disease",
-    "sudden death",
     "pulmonary disease",
     "lung cancer",
     "colorectal cancer",
@@ -51,3 +53,6 @@ options <-
     "none"
   )
 
+
+# note CDH is not the same as aortic aneurysm, though both are related
+# https://pmc.ncbi.nlm.nih.gov/articles/PMC7711307/#:~:text=Even%20though%20abdominal%20aortic%20aneurysm,but%20also%20several%20important%20differences.
