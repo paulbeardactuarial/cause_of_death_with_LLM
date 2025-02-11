@@ -1,0 +1,349 @@
+---
+title: "write-up"
+format: html
+editor: visual
+---
+
+Recently an actuarial colleague came across a problem. They wanted to assign a dataset with very granular causes of death, to broader categories of death. This can be a problem for any actuary working in longevity, where we might want to apply stresses for the various drivers of mortality. Sometimes categories can vary between drivers, and in the worst case scenarios, the strings used for causes of death are free text so that pattern matching is challenging.
+
+Before the AI overlords take over, and the only cause of mortality is simply "death by robot" I wanted to see if LLMs could help with this classification problem.
+
+## The Aim 
+
+To hook up R to the API of various LLMs and get it to perform the onerous task of classifying this data for us? Can we get the LLMs to do a job that might have taken an actuary lots of time, and googling? Can we do it in a way that if circumstances change we simply press a button and update?
+
+The Premise For this experiment I will get different LLMs to classify the ICD-10 causes of death into broader categories. The categories I have pulled from a paper online related to the cause-specific mortality impact of smoking. The paper and categories are not too important, they are just an example of what an actuary might be use. The following paper...
+
+https://pmc.ncbi.nlm.nih.gov/articles/PMC3229033/#:\~:text=Current%20smokers%20had%20significantly%20higher,23.93)%2C%20smoking%2Drelated%20cancers
+
+...states that smoking showed an increase in mortality for the following categories of disease:
+
+-   coronary heart disease
+
+-   cerebrovascular disease
+
+-   pulmonary disease
+
+-   lung cancer
+
+-   colorectal cancer
+
+-   larynx cancer
+
+-   kidney cancer
+
+-   acute myeloid leukemia
+
+-   oral cavity cancer
+
+-   esophageal cancer
+
+-   pancreatic cancer
+
+-   bladder cancer
+
+-   stomach cancer
+
+-   prostate cancer
+
+-   sudden death
+
+It's always a good time to quit smoking.
+
+This paper would be very useful, but my other dataset is the ONS cause of death mortality by ICD-10 code in England and Wales. There are thousands of cause of death types. Each category above encapsulates many of those. Can an LLM do figure this out for me?
+
+## Method 
+
+My initial attempt at this tried to use the {mall} package and an LLM that I downloaded straight to my computer. It became apparent quite soon that the processing power of LLMs is enormous, and too much for my humble laptop.
+
+Instead, I have used the brilliant {ellmer} package. This package allows R users to connect to a whole range of APIs available. Spoilt for choice, I set up a few links. The following LLMs were used:
+
+-   Chat GPT 4o (gpt-4o-2024-08-06)
+
+-   Chat GPT 4o Mini (gpt-4o-mini-2024-07-18)
+
+-   Gemini (gemini-2.0-flash-001)
+
+-   Llama (llama-3.3-70b-versatile)
+
+-   Deepseek R1, distilled (deepseek-r1-distill-llama-70b)
+
+Initial attempts revealed some of the problems with using LLMs to clean data.
+
+The first issue was around token limits and speed. Sending a single cause of death at a time would be unlikely to trigger the limits of the API and has the benefit of data structure being more regular (see second issue). However it would take far too long, and would be inefficient with token use asking the same question for each single cause of death. On the opposite end of the spectrum, sending data in larger chunks can sometimes cause failure as token limits are reached for a request. They also create data structure problem as the LLM is now giving us multiple data points in one chat we must decode this and hope they haven't gone off-the-wall. In the end the best solution was to chunk the data and send over in batches.
+
+The second main issue was getting data back in a regular format. It was almost comical how badly behave some of the LLMs were at being regular. Sometimes the no. of results didn't match the no. of items sent. It was also impossible to get Deepseek to stop explaining itself in the output - no matter what I told it in the prompt! In the end it became apparent the best strategy was to communicate in JSON format and get the key results wrapped up in markers so I can extract it from the text and convert back to a dataframe using jsonlite::fromJSON(). The initial prompt evolved over time. Below is what I sent in relation to structure:
+
+You are a classification LLM. You will receive a JSON file. The file will contain a list of items with cause_of_death. It is important that you return only an edited version of the JSON file. Add 'category' to each item, which can only ever pick one of the values below. No explanations. Return only the data in a structured JSON format. Your final JSON code must begin with \tex\`\`\` and end with \tex\`\`\`
+
+The final issue was ambiguity. Some of the categories in the smoking paper could be interpreted in different ways. For example "pulmonary disease" technically means any disease of the lungs, yet this could entail something completely disconnected to smoking, such as tuberculosis with HIV or asbestos poisoning. Genetic disorders are also not going to be relevant to our risk driver in this case. In the end, I added further instruction to my LLM prompt:
+
+*"If a cause of death cannot be linked to smoking in any way, for example if it is an infectious disease, a genetic disorder, or has an external cause provided in the cause_of_death text (e.g. asbestos), then assign the category as "none""*
+
+This didn't eliminate some ambiguity over some of the groups. In particular, the terms "sudden death" and "coronary heart disease" weren't clear to me what they entailed precisely. Given I was hoping to mark the results, I dropped "sudden death" and changed to "ischaemic heart disease" respectively.
+
+Finally, before I fed the causes of death into the LLM, I shuffled them. My original dataset was already ordered in a way that hinted at its groups. This was very handy for me when I had an attempt at categorising, but why should I give the robots the same privilege? By shuffling we prevent them getting wise to patterns, and demonstrate extra capability of the artificial actuary over the human actuary.
+
+```{r}
+#| echo: false
+
+# get input data
+source("./data_import.R")
+
+# get results of LLMs
+output_groq_llama33 <- read_rds("./Data/output_groq_llama33.rds")
+output_openai_gpt_4o_mini <- read_rds("./Data/output_openai_gpt_4o_mini.rds")
+output_openai_gpt_4o <- read_rds("./Data/output_openai_gpt_4o.rds")
+output_deepseek_r1 <- read_rds("./Data/output_deepseek_r1.rds")
+output_gemini <- read_rds("./Data/output_gemini.rds")
+
+# add human version of categorisation
+human_fp <- r"{C:\Users\paulb\R\Projects\cause_of_death_with_LLM\Data\Human Classification v2.xlsx}"
+output_human <- readxl::read_excel(human_fp, sheet = "category_human")
+
+# function for cleaning LLMs
+json_list_to_df <- function(output_list) {
+  output_list |>
+    purrr::map(function(x) {
+      has_ticks <- stringr::str_detect(x, "```")
+      if (has_ticks) {
+        x <- x |>
+          stringr::str_extract_all("(?s)```(.*?)```") |>
+          pluck(1) |>
+          tail(1)
+      }
+      x |>
+        stringr::str_remove_all("\`") |>
+        stringr::str_remove("json") |>
+        jsonlite::fromJSON()
+    }) |>
+    dplyr::bind_rows()
+}
+
+
+output_openai_gpt_4o_mini <- output_openai_gpt_4o_mini |>
+  json_list_to_df() |>
+  unique() |>
+  mutate(across(everything(), tolower))
+output_openai_gpt_4o <- output_openai_gpt_4o |>
+  json_list_to_df() |>
+  unique() |>
+  mutate(across(everything(), tolower))
+output_groq_llama33 <- output_groq_llama33 |>
+  json_list_to_df() |>
+  unique() |>
+  mutate(across(everything(), tolower))
+output_deepseek_r1 <- output_deepseek_r1 |>
+  json_list_to_df() |>
+  unique() |>
+  mutate(across(everything(), tolower))
+output_gemini <- output_gemini |>
+  json_list_to_df() |>
+  unique() |>
+  mutate(across(everything(), tolower))
+
+results_df <-
+  tibble(cause_of_death = cod_vector, category = NA) |>
+  unique() |>
+  mutate(across(everything(), tolower)) |>
+  left_join(output_openai_gpt_4o_mini, by = "cause_of_death", suffix = c("", "_gpt_4o_mini")) |>
+  left_join(output_openai_gpt_4o, by = "cause_of_death", suffix = c("", "_gpt_4o")) |>
+  left_join(output_groq_llama33, by = "cause_of_death", suffix = c("", "_groq_llama33")) |>
+  left_join(output_deepseek_r1, by = "cause_of_death", suffix = c("", "_deepseek_r1")) |>
+  left_join(output_gemini, by = "cause_of_death", suffix = c("", "_gemini")) |>
+  select(-category)
+```
+
+You can add options to executable code like this
+
+```{r}
+#| echo: false
+
+
+results_consensus <-
+  results_df |>
+  tidyr::pivot_longer(
+    tidyselect::starts_with("category_"),
+    names_to = "llm_type",
+    values_to = "category"
+  ) |>
+  summarise(
+    llm_types = list(llm_type),
+    consensus_no = dplyr::n(),
+    .by = c("cause_of_death", "category")
+  ) |>
+  dplyr::filter(
+    consensus_no == max(consensus_no),
+    .by = c("cause_of_death")
+  )
+
+cause_of_death_without_consensus <-
+  results_consensus |>
+  dplyr::filter(
+    dplyr::row_number() > 1,
+    .by = cause_of_death
+  ) |>
+  dplyr::pull(cause_of_death)
+
+
+results_consensus <-
+  results_consensus |>
+  dplyr::filter(
+    dplyr::row_number() == 1,
+    .by = cause_of_death
+  ) |>
+  dplyr::mutate(
+    without_consensus = cause_of_death %in% cause_of_death_without_consensus
+  ) |>
+  select(cause_of_death,
+    category_consensus = category,
+    consensus_no,
+    without_consensus
+  )
+
+```
+
+The `echo: false` option disables the printing of code (only output is displayed).
+
+```{r}
+
+results_df <-
+  results_df |>
+  # add consesnsus to results df
+  left_join(
+    results_consensus,
+    by = "cause_of_death",
+    relationship = "one-to-one"
+  ) |>
+  #  add human results to df
+  left_join(output_human, by = "cause_of_death") |>
+  mutate(category_human = coalesce(category_human, "none")) |>
+  mutate(
+    across(
+      starts_with("category_"),
+      \(x) factor(x, levels = options)
+    )
+  )
+
+```
+
+```{r}
+
+
+results_df |>
+  summarise(
+    across(
+      starts_with("category_"),
+      function(x) sum(category_human == x, na.rm = TRUE) / sum(!is.na(x))
+  )
+  ) |> 
+  pivot_longer(cols = everything()) |> 
+  arrange(desc(value)) |> 
+  select(model = name, accuracy = value) |> 
+  mutate(model = stringr::str_remove(model, "category_")) |> 
+  filter(model != "human") |> 
+  gt() |> 
+  gt::fmt_percent("accuracy", decimals = 1) |> 
+  # tab_footnote(
+  #   "consensus is most common guess across all 5 models",
+  #   cells_body(
+  #     "model",
+  #     model == "consensus"
+  #   )
+  # ) |> 
+  cols_label_with(fn = function(x) stringr::str_replace(x, "_", " ") |> tools::toTitleCase()) |> 
+  tab_options(column_labels.background.color = "green3")
+
+```
+
+```{r}
+#| echo: false
+
+
+
+results_df |>
+  count(category_consensus, category_human) |> 
+  pivot_wider(names_from = category_human, values_from = n, values_fill = 0) |> 
+  arrange(category_consensus) |> 
+  select(dplyr::all_of(c("category_consensus", options))) |> 
+  gt(rowname_col = "category_consensus") |>
+  # headers blue
+  tab_style(
+    style = list(
+      cell_fill(color = "blue"),
+      cell_text(color = "white")
+    ),
+    locations = list(
+      cells_column_labels(),
+      cells_stub()
+    )
+  ) |>
+  # diagonals grey
+  reduce(1:length(options),
+         .f = function(x, y) {
+           x |> tab_style(
+             style = list(
+               cell_fill(color = "darkgray"),
+               cell_text(color = "white")
+             ),
+             locations = cells_body(
+               columns = y + 1,
+               rows = y 
+             )
+           )
+         },
+         .init = _
+  )  |>  
+  cols_align("center") |> 
+  tab_options(
+    data_row.padding = px(30),
+    heading.padding = px(30)
+    ) |> 
+  cols_width(everything() ~ px(100))
+
+
+
+```
+
+```{r}
+
+
+results_df |>
+  pivot_longer(starts_with("category_") & !ends_with("human"), names_to = "model", values_to = "category") |>
+  mutate(correct = category_human == category) |>
+  summarise(
+    true_positive = sum(correct & category_human != "none", na.rm = TRUE),
+    true_negative = sum(correct & category_human == "none", na.rm = TRUE),
+    false_positive = sum(!correct & category_human == "none", na.rm = TRUE),
+    false_negative = sum(!correct & category_human != "none", na.rm = TRUE),
+    .by = model
+  ) |>
+  mutate(
+    precision = true_positive / (true_positive + false_positive),
+    recall = true_positive / (true_positive + false_negative),
+    f1 = 2 * precision * recall / (precision + recall)
+  ) |> 
+  arrange(desc(f1)) |> 
+  gt() |> 
+  fmt_percent(columns = tidyselect::any_of(c("precision", "recall", "f1")), decimals = 1) |> 
+  cols_label_with(fn = function(x) stringr::str_replace(x, "_", " ") |> tools::toTitleCase()) |> 
+  tab_options(column_labels.background.color = "green3")
+
+
+
+```
+
+```{r}
+
+results_df |> 
+  filter(
+    if_any(
+      starts_with("category_"),
+      function(x) x != category_human)
+  ) |> 
+  filter(
+    category_consensus != category_human & category_human != "none"
+  ) |> 
+  glimpse()
+
+```
