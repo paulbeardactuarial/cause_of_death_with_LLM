@@ -1,7 +1,9 @@
 ---
-title: "write-up"
+title: "Artificial Actuary: Classifying Causes of Death"
 format: html
 editor: visual
+execute:
+  code-fold: true
 ---
 
 Recently an actuarial colleague came across a problem. They wanted to assign a dataset with very granular causes of death, to broader categories of death. This can be a problem for any actuary working in longevity, where we might want to apply stresses for the various drivers of mortality. Sometimes categories can vary between drivers, and in the worst case scenarios, the strings used for causes of death are free text so that pattern matching is challenging.
@@ -12,11 +14,11 @@ Before the AI overlords take over, and the only cause of mortality is simply "de
 
 Using R, connect to the API of various LLMs and get them to perform the onerous task of classifying data for us. Can we get the LLMs to do a job that might have taken an actuary lots of time and effort? Can we do it in a way that is automatable, such that if circumstances change we simply press a button and update?
 
-## The Premise 
+## The Premise
 
 For this experiment I will get different LLMs to classify the ICD-10 causes of death into broader categories. The categories I have pulled from a paper online related to the cause-specific mortality impact of smoking. The paper and categories are not too important, they are just an example of what an actuary might be use. The following paper...
 
-https://pmc.ncbi.nlm.nih.gov/articles/PMC3229033/#:\~:text=Current%20smokers%20had%20significantly%20higher,23.93)%2C%20smoking%2Drelated%20cancers
+[Cigarette Smoking Cessation, Total and Cause-specific Mortality: A 22-Year Follow-up Study in US Male Physicians](https://pmc.ncbi.nlm.nih.gov/articles/PMC3229033/#:\~:text=Current%20smokers%20had%20significantly%20higher,23.93)%2C%20smoking%2Drelated%20cancers)
 
 ...states that smoking showed an increase in mortality for the following categories of disease:
 
@@ -87,8 +89,10 @@ This didn't eliminate some ambiguity over some of the groups. In particular, the
 Finally, before I fed the causes of death into the LLM, I shuffled them. My original dataset was already ordered in a way that hinted at its groups. This was very handy for me when I had an attempt at categorising, but why should I give the robots the same privilege? By shuffling we prevent them getting wise to patterns, and demonstrate extra capability of the artificial actuary over the human actuary.
 
 ```{r}
-#| title: data import
+#| label: data import
 #| echo: false
+#| message: false
+#| warning: false
 
 library(tidyverse)
 library(ellmer)
@@ -97,6 +101,7 @@ library(gtExtras)
 
 # get input data
 source("./data_import.R")
+source("./other functions.R")
 
 # get results of LLMs
 output_groq_llama33 <- read_rds("./Data/output_groq_llama33.rds")
@@ -112,26 +117,8 @@ output_human <- readxl::read_excel(human_fp, sheet = "category_human")
 ```
 
 ```{r}
-
-# function for cleaning LLMs
-json_list_to_df <- function(output_list) {
-  output_list |>
-    purrr::map(function(x) {
-      has_ticks <- stringr::str_detect(x, "```")
-      if (has_ticks) {
-        x <- x |>
-          stringr::str_extract_all("(?s)```(.*?)```") |>
-          pluck(1) |>
-          tail(1)
-      }
-      x |>
-        stringr::str_remove_all("\`") |>
-        stringr::str_remove("json") |>
-        jsonlite::fromJSON()
-    }) |>
-    dplyr::bind_rows()
-}
-
+#| label: combine LLM data imported
+#| echo: false
 
 output_openai_gpt_4o_mini <- output_openai_gpt_4o_mini |>
   json_list_to_df() |>
@@ -160,15 +147,14 @@ results_df <-
   mutate(across(everything(), tolower)) |>
   left_join(output_openai_gpt_4o_mini, by = "cause_of_death", suffix = c("", "_gpt_4o_mini")) |>
   left_join(output_openai_gpt_4o, by = "cause_of_death", suffix = c("", "_gpt_4o")) |>
-  left_join(output_groq_llama33, by = "cause_of_death", suffix = c("", "_groq_llama33")) |>
+  left_join(output_groq_llama33, by = "cause_of_death", suffix = c("", "_llama_33")) |>
   left_join(output_deepseek_r1, by = "cause_of_death", suffix = c("", "_deepseek_r1")) |>
   left_join(output_gemini, by = "cause_of_death", suffix = c("", "_gemini")) |>
   select(-category)
 ```
 
-You can add options to executable code like this
-
 ```{r}
+#| label: determine consensus
 #| echo: false
 
 
@@ -189,7 +175,7 @@ results_consensus <-
     .by = c("cause_of_death")
   ) |> 
   mutate(
-    category_consensus_unanimous = if_else(consensus_no == 5, category, NA)
+    category_unanimous_consensus = if_else(consensus_no == 5, category, NA)
   )
 
 cause_of_death_without_consensus <-
@@ -214,14 +200,14 @@ results_consensus <-
     category_consensus = category,
     consensus_no,
     without_consensus,
-    category_consensus_unanimous
+    category_unanimous_consensus
   )
 
 ```
 
-The `echo: false` option disables the printing of code (only output is displayed).
-
 ```{r}
+#| label: attach human and consensus to results
+#| echo: false
 
 results_df <-
   results_df |>
@@ -243,8 +229,15 @@ results_df <-
 
 ```
 
-```{r}
+## Results
 
+There were 3,598 causes of death. I processed the category returned by each model, and compared to my own evaluation. A huge caveat here is that I am not a medical doctor, and have done the best with my very limited faculties. In general I have used the broader categorisation of ICD-10 codes that already exists.
+
+The accuracy of every model was at least 93%. However because 3,353 of the causes of death fed in should not have been assigned a category, a score of 93% would also be attained by simply stating "none" for everything.
+
+```{r}
+#| label: table of accuracy and attempts
+#| echo: false
 
 results_df |>
   summarise(
@@ -252,7 +245,7 @@ results_df |>
       starts_with("category_"),
       .fns = list(
         accuracy = function(x) sum(category_human == x, na.rm = TRUE) / sum(!is.na(x)),
-        proportion_attempted = function(x) sum(!is.na(x)) / sum(!is.na(category_human))
+        proportion_answered = function(x) sum(!is.na(x)) / sum(!is.na(category_human))
   ), 
   .names = "{.col}|{.fn}"
   )
@@ -264,65 +257,20 @@ results_df |>
   mutate(model = stringr::str_remove(model, "category_")) |> 
   filter(model != "human") |> 
   gt() |> 
-  gt::fmt_percent(c("proportion_attempted", "accuracy"), decimals = 1) |> 
-  gt::fmt_percent(c("proportion_attempted"), decimals = 0) |> 
+  gt::fmt_percent(c("proportion_answered", "accuracy"), decimals = 1) |> 
+  gt::fmt_percent(c("proportion_answered"), decimals = 0) |> 
   cols_label_with(fn = function(x) stringr::str_replace(x, "_", " ") |> tools::toTitleCase()) |> 
   tab_options(column_labels.background.color = "forestgreen") |> 
-  cols_width("proportion_attempted" ~ px(100),
+  cols_width("proportion_answered" ~ px(100),
              "accuracy" ~px(100))
 
 ```
 
+To get a better understanding of the model success, we look at the stats of precision, recall and f1. A higher precision score means the model was often right when assigning a category (other than "none"). A higher recall score means the model did not often assign a category incorrectly (other than "none"). The F1 score combines these two to give an overall performance rating.
+
 ```{r}
+#| label: table of recall, precision and f1
 #| echo: false
-
-# 
-# 
-# results_df |>
-#   count(category_consensus, category_human) |> 
-#   pivot_wider(names_from = category_human, values_from = n, values_fill = 0) |> 
-#   arrange(category_consensus) |> 
-#   select(dplyr::all_of(c("category_consensus", options))) |> 
-#   gt(rowname_col = "category_consensus") |>
-#   # headers blue
-#   tab_style(
-#     style = list(
-#       cell_fill(color = "blue"),
-#       cell_text(color = "white")
-#     ),
-#     locations = list(
-#       cells_column_labels(),
-#       cells_stub()
-#     )
-#   ) |>
-#   # diagonals grey
-#   reduce(1:length(options),
-#          .f = function(x, y) {
-#            x |> tab_style(
-#              style = list(
-#                cell_fill(color = "darkgray"),
-#                cell_text(color = "white")
-#              ),
-#              locations = cells_body(
-#                columns = y + 1,
-#                rows = y 
-#              )
-#            )
-#          },
-#          .init = _
-#   )  |>  
-#   cols_align("center") |> 
-#   tab_options(
-#     data_row.padding = px(30),
-#     heading.padding = px(30)
-#     ) |> 
-#   cols_width(everything() ~ px(100))
-
-
-
-```
-
-```{r}
 
 results_stats <-
 results_df |>
@@ -344,6 +292,7 @@ results_df |>
   arrange(desc(f1)) 
 
 results_stats |> 
+  filter(!model |> str_detect("consensus")) |> 
   gt() |> 
   cols_label_with(fn = function(x) stringr::str_replace(x, "_", " ") |> tools::toTitleCase()) |> 
   tab_options(column_labels.background.color = "forestgreen") |> 
@@ -354,12 +303,68 @@ results_stats |>
       x |> gtExtras::gt_plt_bar_pct(column = !!y, labels = TRUE, scaled = TRUE, decimals = 0, fill = "forestgreen") 
     }
   ) |> 
+  cols_align(align = "center", -"model") |> 
   tab_spanner("Scores", columns = c("precision", "recall", "f1")) |> 
-  tab_spanner("Count", columns = ends_with("Negative") | ends_with("Positive")) 
+  tab_spanner("Count", columns = ends_with("Negative") | ends_with("Positive"))
+
 
 ```
 
+We can see that gpt_4o_mini is more reserved than the other models - only assigning a category to 132 causes of death. This results in the highest precision score, but a punishing recall score which leads it ranked near the bottom. Some of the mistakes made by gpt_4o_mini highlighted this over-cautiousness. For example the gpt_4o_mini model failed to class "intracerebral haemorrhage in brain stem" as a "cerebrovascular disease" which is probably one of the less ambiguous cases, and instead class it as "none". There are many similar examples in the results data.
+
+We can see that llama_33 had the opposite problem, assigning a category to 430 causes of death. This led to a great recall but poor precision, which ranked it last. Having looked through the individual results, it is clear to me that llama deserved its place at the bottom. It often assigned "{body part} cancer" to any disease with a corresponding body part. This led to many false positives which were fairly obvious. An example would be assigning "alcohol-induced acute pancreatitis" to "pancreatic cancer" which is clearly not appropriate given the prompt it was provided.
+
+Gemini was also quite gung-ho, though faired better than llama.
+
+The clear winners were gpt_4o and deepseek_r1. Looking through the differences, they were due to more ambiguous cases rather than clear error.
+
+## Meta Results
+
+The F1 scores attained were good, but not incredible. We are certainly not ready to hand the steering wheel over to our artificial friends just yet. But can we use the wisdom of crowds to boost our results further? I created two meta-models.
+
+"consensus" picks the most common category of the 5 models above
+
+"unanimous_consensus" picks the category that all 5 models agreed on, if they did not all agree it refrains from answering
+
+The results are impressive, with "consensus" having strong scores, and "unanimous_consensus" having fantastic results. In all unanimous cases of differences, it was for the most ambiguous of categories, and I was no more sure of my own answer than the models. I could certainly have been persuaded that "unanimous_consensus" was the correct answer each time.
+
 ```{r}
+#| label: table of recall, precision and f1 for consensus
+#| echo: false
+
+results_stats |> 
+  filter(model |> str_detect("consensus")) |> 
+  gt() |> 
+  cols_label_with(fn = function(x) stringr::str_replace(x, "_", " ") |> tools::toTitleCase()) |> 
+  tab_options(column_labels.background.color = "forestgreen") |> 
+  reduce(
+    c("precision", "recall", "f1"),
+    .init = _,
+    function(x, y) {
+      x |> gtExtras::gt_plt_bar_pct(column = !!y, labels = TRUE, scaled = TRUE, decimals = 0, fill = "forestgreen") 
+    }
+  ) |> 
+  cols_align(align = "center", -"model") |> 
+  tab_spanner("Scores", columns = c("precision", "recall", "f1")) |> 
+  tab_spanner("Count", columns = ends_with("Negative") | ends_with("Positive")) 
+```
+
+Although the pickiness of "unanimous_consensus" helped boost its scores, it came at a cost. This meta-model failed to provide a category for 444 causes of death, which was 12% of the data fed in. One could still say that 88% of our data was categorised with high accuracy is a great win, and the actuary now only has to deal with 444 cases instead of the overwhelming 3,500+.
+
+The "consensus" meta-model actually returned an answer for every cause of death. There was never a split decision between the LLMs. This strategy would be a good way to go if we were adamant we didn't want to review any of the data ourselves!
+
+### Conclusion
+
+Although many actuaries now ask questions of AI to help with their day-to-day work, using R it is possible to go further and integrate the AI into actuarial data processing and even models. I have provided just one use case here, but there are many more out there for the typical actuary.
+
+Using one LLM is helpful. Using many is very helpful. We are not at a point where the artificial actuary can replace the human one yet. The LLMs cannot understand the broader context of the problem, and this was clear to me each time I had to alter the prompt to get things working.
+
+This demonstration not only highlights the usefulness of AI, but the enhanced possibilities when working with the more modern actuarial coding languages like R and Python.
+
+```{r}
+#| label: just messing around looking at results 
+#| echo: false
+#| include: false
 
 results_df |> 
   filter(
@@ -368,40 +373,21 @@ results_df |>
       function(x) x != category_human)
   ) |> 
   filter(
-    category_consensus_unanimous != category_human
+    category_unanimous_consensus != category_human
   ) |> 
   select(
-    cause_of_death, category_human, category_consensus_unanimous
+    cause_of_death, category_human, category_unanimous_consensus
   ) |> 
-  arrange(category_human, category_consensus_unanimous) |> 
+  arrange(category_human, category_unanimous_consensus) |> 
   gt() |> 
   cols_label_with(fn = function(x) x |> str_replace("category_", "") |> str_replace("_", " ") |> tools::toTitleCase()) |> 
   tab_options(column_labels.background.color = "forestgreen") |> 
   tab_spanner("Category", starts_with("category_"))  |> 
     cols_width("category_human" ~ px(200),
-             "category_consensus_unanimous" ~px(200))
-  
+             "category_unanimous_consensus" ~px(200))
 
+results_df |> dplyr::filter(if_any(starts_with("category_"), function(x) x != category_human)) |> View()
 
-results_df |> 
-  filter(
-    if_any(
-      starts_with("category_"),
-      function(x) x != category_human)
-  ) |> 
-  filter(
-    category_consensus != category_human
-  ) |> 
-  select(
-    cause_of_death, category_human, category_consensus
-  ) |> 
-  arrange(category_human, category_consensus) 
-
-  gt() |> 
-  cols_label_with(fn = function(x) x |> str_replace("category_", "") |> str_replace("_", " ") |> tools::toTitleCase()) |> 
-  tab_options(column_labels.background.color = "forestgreen") |> 
-  tab_spanner("Category", starts_with("category_"))  |> 
-    cols_width("category_human" ~ px(200),
-             "category_consensus_unanimous" ~px(200))
+results_df |> dplyr::filter(if_any(starts_with("category_"), function(x) x != category_human & x == "none" & category_human != "none")) |> View()
 
 ```

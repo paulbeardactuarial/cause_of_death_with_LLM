@@ -1,4 +1,6 @@
 
+set.seed(1)
+
 # cause of death data can be downloaded from https://www.nomisweb.co.uk/query/construct/summary.asp?menuopt=200&subcomp=
 # the file below was downloaded from this site
 fp <- r"{./Data/34506561512084822.csv}"
@@ -54,3 +56,10 @@ options <-
 
 # note CDH is not the same as aortic aneurysm, though both are related
 # https://pmc.ncbi.nlm.nih.gov/articles/PMC7711307/#:~:text=Even%20though%20abdominal%20aortic%20aneurysm,but%20also%20several%20important%20differences.
+
+
+
+
+
+
+

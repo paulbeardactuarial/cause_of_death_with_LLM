@@ -1,24 +1,17 @@
 
+# get input data
 source("./data_import.R")
 
+# get results of LLMs
 output_groq_llama33 <- read_rds("./Data/output_groq_llama33.rds")
 output_openai_gpt_4o_mini <- read_rds("./Data/output_openai_gpt_4o_mini.rds")
 output_openai_gpt_4o <- read_rds("./Data/output_openai_gpt_4o.rds")
 output_deepseek_r1 <- read_rds("./Data/output_deepseek_r1.rds")
 output_gemini <- read_rds("./Data/output_gemini.rds")
 
-json_list_to_df <- function(output_list) {
-  output_list |> purrr::map(function(x) {
-    has_ticks <- stringr::str_detect(x, "```")
-    if(has_ticks) {
-      x <- x |> stringr::str_extract_all( "(?s)```(.*?)```") |> pluck(1) |> tail(1)
-      }
-    x |> 
-      stringr::str_remove_all("\`") |>
-      stringr::str_remove("json") |>
-      jsonlite::fromJSON()
-  }) |> dplyr::bind_rows()
-}
+# add human version of categorisation
+human_fp <- r"{C:\Users\paulb\R\Projects\cause_of_death_with_LLM\Data\Human Classification v2.xlsx}"
+output_human <-  readxl::read_excel(human_fp, sheet = "category_human") 
 
 
 output_openai_gpt_4o_mini <- output_openai_gpt_4o_mini |> json_list_to_df() |> unique() |> mutate(across(everything(), tolower))
@@ -81,27 +74,41 @@ results_consensus |>
          without_consensus)
 
 
-# --------- add consesnsus to results df ---------
+
 
 cod_classified_res <- 
 cod_classified_res |> 
+  # --------- add consesnsus to results df ---------
   left_join(
     results_consensus,
     by = "cause_of_death",
     relationship = "one-to-one"
-  ) 
+  ) |> 
+  # --------- add human results to df ---------
+  left_join(output_human, by = "cause_of_death") |>  
+  mutate(category_human = coalesce(category_human, "none")) 
+  
+  
+cod_classified_res |> filter(consensus_category != category_human) |> arrange(desc(total)) |> View()
+  
 
-cod_classified_res |> filter(without_consensus) |> glimpse()
-
-
+cod_classified_res <-
 cod_data |> 
   mutate(cause_of_death = tolower(cause_of_death)) |> 
   inner_join(
     cod_classified_res,
     by = "cause_of_death"
-  ) |> 
-  select(cause_of_death, total, consensus_category) |> 
-  split(~consensus_category) 
+  ) 
+  
+  ## |> dplyr::filter(letter == "R") |> View()
+  # select(cause_of_death, total, consensus_category) |> 
+  # split(~consensus_category) |> 
+  # pluck("pulmonary disease")
+
+
+  
+cod_classified_res |> count(consensus_category, category_human, wt = total) |> View()
+
 
 
 
@@ -111,3 +118,100 @@ cod_classified_res |>
     function(x) ((coalesce(x, "none")) != "none")
     )
     ) |> View()
+
+
+
+
+
+
+
+
+
+
+
+results_df |>
+  count(category_consensus, category_human) |> 
+  pivot_wider(names_from = category_human, values_from = n, values_fill = 0) |> 
+  arrange(category_consensus) |> 
+  select(dplyr::all_of(c("category_consensus", options))) |> 
+  gt(rowname_col = "category_consensus") |>
+  # headers blue
+  tab_style(
+    style = list(
+      cell_fill(color = "blue"),
+      cell_text(color = "white")
+    ),
+    locations = list(
+      cells_column_labels(),
+      cells_stub()
+    )
+  ) |>
+  # diagonals grey
+  reduce(1:length(options),
+         .f = function(x, y) {
+           x |> tab_style(
+             style = list(
+               cell_fill(color = "darkgray"),
+               cell_text(color = "white")
+             ),
+             locations = cells_body(
+               columns = y + 1,
+               rows = y 
+             )
+           )
+         },
+         .init = _
+  )  |>  
+  cols_align("center") |> 
+  tab_options(
+    data_row.padding = px(30),
+    heading.padding = px(30)
+    ) |> 
+  cols_width(everything() ~ px(100))
+
+
+fn_tp <-
+  results_df |>
+    mutate(correct = category_human == category_consensus) |>
+    count(category_human, correct) |>
+    pivot_wider(names_from = correct, values_from = n, values_fill = 0) |>
+    select(category = category_human, TP = `TRUE`, FN = `FALSE`)
+  
+fp <-
+results_df |>
+    mutate(correct = category_human == category_consensus) |>
+    count(category_consensus, correct) |>
+    pivot_wider(names_from = correct, values_from = n, values_fill = 0) |>
+    select(category = category_consensus, FP = `FALSE`)
+
+merge(fn_tp, fp, by = "category") |> 
+  mutate(precision = TP / (TP + FP),
+         recall = TP / (TP + FN),
+         f1 = 2 * precision * recall / (precision + recall)) |> 
+  arrange(category)
+
+
+
+
+results_df |>
+  summarise(
+    across(
+      starts_with("category_"),
+      function(x) sum(category_human == x, na.rm = TRUE) / sum(!is.na(x))
+  )
+  ) |> 
+  pivot_longer(cols = everything()) |> 
+  arrange(desc(value)) |> 
+  select(model = name, accuracy = value) |> 
+  mutate(model = stringr::str_remove(model, "category_")) |> 
+  filter(model != "human") |> 
+  gt() |> 
+  gt::fmt_percent("accuracy", decimals = 1) |> 
+  tab_footnote(
+    "consensus is most common guess across all 5 models",
+    cells_body(
+      "model",
+      model == "consensus"
+    )
+  )
+
