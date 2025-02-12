@@ -8,11 +8,13 @@ Recently an actuarial colleague came across a problem. They wanted to assign a d
 
 Before the AI overlords take over, and the only cause of mortality is simply "death by robot" I wanted to see if LLMs could help with this classification problem.
 
-## The Aim 
+## The Aim
 
-To hook up R to the API of various LLMs and get it to perform the onerous task of classifying this data for us? Can we get the LLMs to do a job that might have taken an actuary lots of time, and googling? Can we do it in a way that if circumstances change we simply press a button and update?
+Using R, connect to the API of various LLMs and get them to perform the onerous task of classifying data for us. Can we get the LLMs to do a job that might have taken an actuary lots of time and effort? Can we do it in a way that is automatable, such that if circumstances change we simply press a button and update?
 
-The Premise For this experiment I will get different LLMs to classify the ICD-10 causes of death into broader categories. The categories I have pulled from a paper online related to the cause-specific mortality impact of smoking. The paper and categories are not too important, they are just an example of what an actuary might be use. The following paper...
+## The Premise 
+
+For this experiment I will get different LLMs to classify the ICD-10 causes of death into broader categories. The categories I have pulled from a paper online related to the cause-specific mortality impact of smoking. The paper and categories are not too important, they are just an example of what an actuary might be use. The following paper...
 
 https://pmc.ncbi.nlm.nih.gov/articles/PMC3229033/#:\~:text=Current%20smokers%20had%20significantly%20higher,23.93)%2C%20smoking%2Drelated%20cancers
 
@@ -52,7 +54,7 @@ It's always a good time to quit smoking.
 
 This paper would be very useful, but my other dataset is the ONS cause of death mortality by ICD-10 code in England and Wales. There are thousands of cause of death types. Each category above encapsulates many of those. Can an LLM do figure this out for me?
 
-## Method 
+## Method
 
 My initial attempt at this tried to use the {mall} package and an LLM that I downloaded straight to my computer. It became apparent quite soon that the processing power of LLMs is enormous, and too much for my humble laptop.
 
@@ -85,7 +87,13 @@ This didn't eliminate some ambiguity over some of the groups. In particular, the
 Finally, before I fed the causes of death into the LLM, I shuffled them. My original dataset was already ordered in a way that hinted at its groups. This was very handy for me when I had an attempt at categorising, but why should I give the robots the same privilege? By shuffling we prevent them getting wise to patterns, and demonstrate extra capability of the artificial actuary over the human actuary.
 
 ```{r}
+#| title: data import
 #| echo: false
+
+library(tidyverse)
+library(ellmer)
+library(gt)
+library(gtExtras)
 
 # get input data
 source("./data_import.R")
@@ -100,6 +108,10 @@ output_gemini <- read_rds("./Data/output_gemini.rds")
 # add human version of categorisation
 human_fp <- r"{C:\Users\paulb\R\Projects\cause_of_death_with_LLM\Data\Human Classification v2.xlsx}"
 output_human <- readxl::read_excel(human_fp, sheet = "category_human")
+
+```
+
+```{r}
 
 # function for cleaning LLMs
 json_list_to_df <- function(output_list) {
@@ -172,9 +184,12 @@ results_consensus <-
     consensus_no = dplyr::n(),
     .by = c("cause_of_death", "category")
   ) |>
-  dplyr::filter(
+  filter(
     consensus_no == max(consensus_no),
     .by = c("cause_of_death")
+  ) |> 
+  mutate(
+    category_consensus_unanimous = if_else(consensus_no == 5, category, NA)
   )
 
 cause_of_death_without_consensus <-
@@ -198,7 +213,8 @@ results_consensus <-
   select(cause_of_death,
     category_consensus = category,
     consensus_no,
-    without_consensus
+    without_consensus,
+    category_consensus_unanimous
   )
 
 ```
@@ -234,72 +250,73 @@ results_df |>
   summarise(
     across(
       starts_with("category_"),
-      function(x) sum(category_human == x, na.rm = TRUE) / sum(!is.na(x))
+      .fns = list(
+        accuracy = function(x) sum(category_human == x, na.rm = TRUE) / sum(!is.na(x)),
+        proportion_attempted = function(x) sum(!is.na(x)) / sum(!is.na(category_human))
+  ), 
+  .names = "{.col}|{.fn}"
   )
   ) |> 
   pivot_longer(cols = everything()) |> 
-  arrange(desc(value)) |> 
-  select(model = name, accuracy = value) |> 
+  separate_wider_delim(name, "|", names = c("model", "metric")) |> 
+  pivot_wider(names_from = "metric", values_from = "value") |> 
+  arrange(desc(accuracy)) |> 
   mutate(model = stringr::str_remove(model, "category_")) |> 
   filter(model != "human") |> 
   gt() |> 
-  gt::fmt_percent("accuracy", decimals = 1) |> 
-  # tab_footnote(
-  #   "consensus is most common guess across all 5 models",
-  #   cells_body(
-  #     "model",
-  #     model == "consensus"
-  #   )
-  # ) |> 
+  gt::fmt_percent(c("proportion_attempted", "accuracy"), decimals = 1) |> 
+  gt::fmt_percent(c("proportion_attempted"), decimals = 0) |> 
   cols_label_with(fn = function(x) stringr::str_replace(x, "_", " ") |> tools::toTitleCase()) |> 
-  tab_options(column_labels.background.color = "green3")
+  tab_options(column_labels.background.color = "forestgreen") |> 
+  cols_width("proportion_attempted" ~ px(100),
+             "accuracy" ~px(100))
 
 ```
 
 ```{r}
 #| echo: false
 
-
-
-results_df |>
-  count(category_consensus, category_human) |> 
-  pivot_wider(names_from = category_human, values_from = n, values_fill = 0) |> 
-  arrange(category_consensus) |> 
-  select(dplyr::all_of(c("category_consensus", options))) |> 
-  gt(rowname_col = "category_consensus") |>
-  # headers blue
-  tab_style(
-    style = list(
-      cell_fill(color = "blue"),
-      cell_text(color = "white")
-    ),
-    locations = list(
-      cells_column_labels(),
-      cells_stub()
-    )
-  ) |>
-  # diagonals grey
-  reduce(1:length(options),
-         .f = function(x, y) {
-           x |> tab_style(
-             style = list(
-               cell_fill(color = "darkgray"),
-               cell_text(color = "white")
-             ),
-             locations = cells_body(
-               columns = y + 1,
-               rows = y 
-             )
-           )
-         },
-         .init = _
-  )  |>  
-  cols_align("center") |> 
-  tab_options(
-    data_row.padding = px(30),
-    heading.padding = px(30)
-    ) |> 
-  cols_width(everything() ~ px(100))
+# 
+# 
+# results_df |>
+#   count(category_consensus, category_human) |> 
+#   pivot_wider(names_from = category_human, values_from = n, values_fill = 0) |> 
+#   arrange(category_consensus) |> 
+#   select(dplyr::all_of(c("category_consensus", options))) |> 
+#   gt(rowname_col = "category_consensus") |>
+#   # headers blue
+#   tab_style(
+#     style = list(
+#       cell_fill(color = "blue"),
+#       cell_text(color = "white")
+#     ),
+#     locations = list(
+#       cells_column_labels(),
+#       cells_stub()
+#     )
+#   ) |>
+#   # diagonals grey
+#   reduce(1:length(options),
+#          .f = function(x, y) {
+#            x |> tab_style(
+#              style = list(
+#                cell_fill(color = "darkgray"),
+#                cell_text(color = "white")
+#              ),
+#              locations = cells_body(
+#                columns = y + 1,
+#                rows = y 
+#              )
+#            )
+#          },
+#          .init = _
+#   )  |>  
+#   cols_align("center") |> 
+#   tab_options(
+#     data_row.padding = px(30),
+#     heading.padding = px(30)
+#     ) |> 
+#   cols_width(everything() ~ px(100))
 
 
 
@@ -307,7 +324,7 @@ results_df |>
 
 ```{r}
 
-
+results_stats <-
 results_df |>
   pivot_longer(starts_with("category_") & !ends_with("human"), names_to = "model", values_to = "category") |>
   mutate(correct = category_human == category) |>
@@ -319,17 +336,26 @@ results_df |>
     .by = model
   ) |>
   mutate(
-    precision = true_positive / (true_positive + false_positive),
-    recall = true_positive / (true_positive + false_negative),
-    f1 = 2 * precision * recall / (precision + recall)
+    precision = true_positive / (true_positive + false_positive) * 100,
+    recall = true_positive / (true_positive + false_negative) * 100,
+    f1 = 2 * precision * recall / (precision + recall) 
   ) |> 
-  arrange(desc(f1)) |> 
+  mutate(model = stringr::str_remove(model, "category_")) |> 
+  arrange(desc(f1)) 
+
+results_stats |> 
   gt() |> 
-  fmt_percent(columns = tidyselect::any_of(c("precision", "recall", "f1")), decimals = 1) |> 
   cols_label_with(fn = function(x) stringr::str_replace(x, "_", " ") |> tools::toTitleCase()) |> 
-  tab_options(column_labels.background.color = "green3")
-
-
+  tab_options(column_labels.background.color = "forestgreen") |> 
+  reduce(
+    c("precision", "recall", "f1"),
+    .init = _,
+    function(x, y) {
+      x |> gtExtras::gt_plt_bar_pct(column = !!y, labels = TRUE, scaled = TRUE, decimals = 0, fill = "forestgreen") 
+    }
+  ) |> 
+  tab_spanner("Scores", columns = c("precision", "recall", "f1")) |> 
+  tab_spanner("Count", columns = ends_with("Negative") | ends_with("Positive")) 
 
 ```
 
@@ -342,8 +368,40 @@ results_df |>
       function(x) x != category_human)
   ) |> 
   filter(
-    category_consensus != category_human & category_human != "none"
+    category_consensus_unanimous != category_human
   ) |> 
-  glimpse()
+  select(
+    cause_of_death, category_human, category_consensus_unanimous
+  ) |> 
+  arrange(category_human, category_consensus_unanimous) |> 
+  gt() |> 
+  cols_label_with(fn = function(x) x |> str_replace("category_", "") |> str_replace("_", " ") |> tools::toTitleCase()) |> 
+  tab_options(column_labels.background.color = "forestgreen") |> 
+  tab_spanner("Category", starts_with("category_"))  |> 
+    cols_width("category_human" ~ px(200),
+             "category_consensus_unanimous" ~px(200))
+  
+
+
+results_df |> 
+  filter(
+    if_any(
+      starts_with("category_"),
+      function(x) x != category_human)
+  ) |> 
+  filter(
+    category_consensus != category_human
+  ) |> 
+  select(
+    cause_of_death, category_human, category_consensus
+  ) |> 
+  arrange(category_human, category_consensus) 
+
+  gt() |> 
+  cols_label_with(fn = function(x) x |> str_replace("category_", "") |> str_replace("_", " ") |> tools::toTitleCase()) |> 
+  tab_options(column_labels.background.color = "forestgreen") |> 
+  tab_spanner("Category", starts_with("category_"))  |> 
+    cols_width("category_human" ~ px(200),
+             "category_consensus_unanimous" ~px(200))
 
 ```
