@@ -6,9 +6,9 @@ execute:
   code-fold: true
 ---
 
-Recently an actuarial colleague came across a problem. They wanted to assign a dataset with very granular causes of death, to broader categories of death. This can be a problem for any actuary working in longevity, where we might want to apply stresses for the various drivers of mortality. Sometimes categories can vary between drivers, and in the worst case scenarios, the strings used for causes of death are free text so that pattern matching is challenging.
+Recently an actuarial colleague came across a problem. They wanted to categorise a dataset containing many irregular and free-text causes of death, into broader categories. This can be a problem for any actuary working in longevity, where we might want to apply stresses for the various drivers of mortality to a select subgroup of the population.
 
-Before the AI overlords take over, and the only cause of mortality is simply "death by robot" I wanted to see if LLMs could help with this classification problem.
+Before the AI overlords take over, and the only cause of mortality is simply "death by robot", I wanted to see if LLMs could help with this classification problem.
 
 ## The Aim
 
@@ -78,7 +78,7 @@ The first issue was around token limits and speed. Sending a single cause of dea
 
 The second main issue was getting data back in a regular format. It was almost comical how badly behave some of the LLMs were at being regular. Sometimes the no. of results didn't match the no. of items sent. It was also impossible to get Deepseek to stop explaining itself in the output - no matter what I told it in the prompt! In the end it became apparent the best strategy was to communicate in JSON format and get the key results wrapped up in markers so I can extract it from the text and convert back to a dataframe using jsonlite::fromJSON(). The initial prompt evolved over time. Below is what I sent in relation to structure:
 
-You are a classification LLM. You will receive a JSON file. The file will contain a list of items with cause_of_death. It is important that you return only an edited version of the JSON file. Add 'category' to each item, which can only ever pick one of the values below. No explanations. Return only the data in a structured JSON format. Your final JSON code must begin with \tex\`\`\` and end with \tex\`\`\`
+*"You are a classification LLM. You will receive a JSON file. The file will contain a list of items with cause_of_death. It is important that you return only an edited version of the JSON file. Add 'category' to each item, which can only ever pick one of the values below. No explanations. Return only the data in a structured JSON format. Your final JSON code must begin with* \tex*\`\`\` and end with* \tex*\`\`\`"*
 
 The final issue was ambiguity. Some of the categories in the smoking paper could be interpreted in different ways. For example "pulmonary disease" technically means any disease of the lungs, yet this could entail something completely disconnected to smoking, such as tuberculosis with HIV or asbestos poisoning. Genetic disorders are also not going to be relevant to our risk driver in this case. In the end, I added further instruction to my LLM prompt:
 
@@ -103,6 +103,8 @@ library(gtExtras)
 source("./data_import.R")
 source("./other functions.R")
 
+# NOTE in order to get these LLM results files you must run the scripts in `LLM Chats` folder. To do this you will need to set up API key as well for each of the APIs used.
+
 # get results of LLMs
 output_groq_llama33 <- read_rds("./Data/output_groq_llama33.rds")
 output_openai_gpt_4o_mini <- read_rds("./Data/output_openai_gpt_4o_mini.rds")
@@ -124,10 +126,12 @@ output_openai_gpt_4o_mini <- output_openai_gpt_4o_mini |>
   json_list_to_df() |>
   unique() |>
   mutate(across(everything(), tolower))
+
 output_openai_gpt_4o <- output_openai_gpt_4o |>
   json_list_to_df() |>
   unique() |>
   mutate(across(everything(), tolower))
+
 output_groq_llama33 <- output_groq_llama33 |>
   json_list_to_df() |>
   unique() |>
@@ -136,6 +140,7 @@ output_deepseek_r1 <- output_deepseek_r1 |>
   json_list_to_df() |>
   unique() |>
   mutate(across(everything(), tolower))
+
 output_gemini <- output_gemini |>
   json_list_to_df() |>
   unique() |>
